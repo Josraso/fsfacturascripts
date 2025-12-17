@@ -826,6 +826,11 @@ class FsFacturaScripts extends Module
      */
     public function hookDisplayOrderDetail($params)
     {
+        // No mostrar si la API REST no está activada
+        if (!Configuration::get('FS_API_ENABLED')) {
+            return '';
+        }
+
         $order = $params['order'];
         $fs_data = $this->getFacturaScriptsData($order->reference);
 
@@ -845,6 +850,11 @@ class FsFacturaScripts extends Module
 
     public function hookDisplayCustomerAccount($params)
     {
+        // No mostrar si la API REST no está activada
+        if (!Configuration::get('FS_API_ENABLED')) {
+            return '';
+        }
+
         return $this->display(__FILE__, 'views/templates/hook/displayCustomerAccount.tpl');
     }
 
