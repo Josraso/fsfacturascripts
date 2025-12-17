@@ -18,7 +18,7 @@ class FsFacturaScripts extends Module
     {
         $this->name = 'fsfacturascripts';
         $this->tab = 'billing_invoicing';
-        $this->version = '3.1.5';
+        $this->version = '3.2.0';
         $this->author = 'FacturaScripts';
         $this->need_instance = 0;
         $this->ps_versions_compliancy = [
@@ -35,6 +35,9 @@ class FsFacturaScripts extends Module
 
         // Verificar y actualizar esquema de BD al cargar el módulo
         $this->checkAndUpdateSchema();
+
+        // Sincronizar estado del tab con configuración
+        $this->syncTabState();
     }
 
     /**
@@ -59,6 +62,27 @@ class FsFacturaScripts extends Module
                     ADD COLUMN `fs_factura_fecha` DATE DEFAULT NULL AFTER `fs_factura_code`"
                 );
             }
+        }
+    }
+
+    /**
+     * Sincronizar estado del tab con configuración de API
+     * Si API REST está desactivada, ocultar el menú
+     */
+    private function syncTabState()
+    {
+        $id_tab = (int)Tab::getIdFromClassName('AdminFsFacturas');
+        if (!$id_tab) {
+            return; // El tab no existe aún
+        }
+
+        $api_enabled = (bool)Configuration::get('FS_API_ENABLED');
+        $tab = new Tab($id_tab);
+
+        // Solo actualizar si el estado es diferente
+        if ($tab->active != $api_enabled) {
+            $tab->active = $api_enabled;
+            $tab->save();
         }
     }
 
@@ -95,6 +119,12 @@ class FsFacturaScripts extends Module
 
     private function installTab()
     {
+        // Verificar si el tab ya existe
+        $id_tab = (int)Tab::getIdFromClassName('AdminFsFacturas');
+        if ($id_tab) {
+            return true; // Ya existe
+        }
+
         $tab = new Tab();
         $tab->active = 1;
         $tab->class_name = 'AdminFsFacturas';
@@ -102,9 +132,45 @@ class FsFacturaScripts extends Module
         foreach (Language::getLanguages(true) as $lang) {
             $tab->name[$lang['id_lang']] = 'Facturas FacturaScripts';
         }
-        $tab->id_parent = (int)Tab::getIdFromClassName('AdminParentOrders');
+
+        // Intentar obtener el ID del menú de Pedidos
+        $id_parent = (int)Tab::getIdFromClassName('AdminParentOrders');
+
+        // Si no existe, intentar con Sell (PrestaShop 8+)
+        if (!$id_parent) {
+            $id_parent = (int)Tab::getIdFromClassName('SELL');
+        }
+
+        // Si aún no existe, buscar AdminOrders y obtener su padre
+        if (!$id_parent) {
+            $id_orders = (int)Tab::getIdFromClassName('AdminOrders');
+            if ($id_orders) {
+                $parent_tab = new Tab($id_orders);
+                $id_parent = (int)$parent_tab->id_parent;
+            }
+        }
+
+        // Si todo falla, usar 0 (raíz)
+        if (!$id_parent) {
+            $id_parent = 0;
+        }
+
+        $tab->id_parent = $id_parent;
         $tab->module = $this->name;
-        return $tab->add();
+
+        if (!$tab->add()) {
+            PrestaShopLogger::addLog(
+                'FacturaScripts: Error al crear tab del menú',
+                3,
+                null,
+                'Module',
+                0,
+                true
+            );
+            return false;
+        }
+
+        return true;
     }
 
     private function uninstallTab()
@@ -115,6 +181,20 @@ class FsFacturaScripts extends Module
             return $tab->delete();
         }
         return true;
+    }
+
+    /**
+     * Activar o desactivar el tab del menú según configuración
+     */
+    private function toggleTabVisibility($enable)
+    {
+        $id_tab = (int)Tab::getIdFromClassName('AdminFsFacturas');
+        if ($id_tab) {
+            $tab = new Tab($id_tab);
+            $tab->active = (bool)$enable;
+            return $tab->save();
+        }
+        return false;
     }
 
     private function createTables()
@@ -224,16 +304,27 @@ class FsFacturaScripts extends Module
             Configuration::updateValue('FS_WEBHOOK_TOKEN', Tools::getValue('FS_WEBHOOK_TOKEN'));
 
             // API REST
-            Configuration::updateValue('FS_API_ENABLED', (int)Tools::getValue('FS_API_ENABLED'));
+            $api_enabled = (int)Tools::getValue('FS_API_ENABLED');
+            Configuration::updateValue('FS_API_ENABLED', $api_enabled);
             Configuration::updateValue('FS_API_URL', Tools::getValue('FS_API_URL'));
             Configuration::updateValue('FS_API_KEY', Tools::getValue('FS_API_KEY'));
             Configuration::updateValue('FS_PDF_FORMAT', (int)Tools::getValue('FS_PDF_FORMAT'));
 
+            // Activar/Desactivar menú según API REST
+            $this->toggleTabVisibility($api_enabled);
+
             // CRON
             Configuration::updateValue('FS_CRON_ENABLED', (int)Tools::getValue('FS_CRON_ENABLED'));
             Configuration::updateValue('FS_CRON_INTERVAL', (int)Tools::getValue('FS_CRON_INTERVAL', 10));
+            Configuration::updateValue('FS_CRON_TOKEN', Tools::getValue('FS_CRON_TOKEN'));
 
             $output .= $this->displayConfirmation($this->l('Configuración guardada'));
+        }
+
+        // Generar token si no existe
+        if (!Configuration::get('FS_CRON_TOKEN')) {
+            $token = bin2hex(random_bytes(16));
+            Configuration::updateValue('FS_CRON_TOKEN', $token);
         }
 
         return $output . $this->displayForm();
@@ -352,6 +443,14 @@ class FsFacturaScripts extends Module
                         'size' => 10
                     ],
                     [
+                        'type' => 'text',
+                        'label' => $this->l('Token de seguridad CRON'),
+                        'name' => 'FS_CRON_TOKEN',
+                        'desc' => $this->l('Token para proteger la URL del cron (generado automáticamente)'),
+                        'size' => 50,
+                        'readonly' => true
+                    ],
+                    [
                         'type' => 'html',
                         'name' => 'cron_info',
                         'html_content' => '<div class="alert alert-info">
@@ -362,9 +461,9 @@ class FsFacturaScripts extends Module
                             <small>Instala el módulo "cronjobs" oficial y se ejecutará automáticamente</small><br><br>
                             <strong>2. Usando crontab del sistema (PHP CLI):</strong><br>
                             <code>*/10 * * * * php ' . _PS_MODULE_DIR_ . 'fsfacturascripts/cron.php</code><br><br>
-                            <strong>3. Usando crontab con wget:</strong><br>
-                            <code>*/10 * * * * wget -q -O- "' . _PS_BASE_URL_ . __PS_BASE_URI__ . 'modules/fsfacturascripts/cron.php?token=facturascripts_cron_2025" > /dev/null 2>&1</code><br>
-                            <small style="color: red;">⚠️ IMPORTANTE: Cambia el token en cron.php por uno seguro antes de usar wget</small>
+                            <strong>3. Usando crontab con wget (recomendado si no tienes acceso SSH):</strong><br>
+                            <code>*/10 * * * * wget -q -O- "' . _PS_BASE_URL_ . __PS_BASE_URI__ . 'modules/fsfacturascripts/cron.php?token=' . Configuration::get('FS_CRON_TOKEN') . '" > /dev/null 2>&1</code><br>
+                            <small style="color: green;">✓ El token se genera automáticamente y está configurado de forma segura</small>
                         </div>'
                     ]
                 ],
@@ -417,7 +516,8 @@ class FsFacturaScripts extends Module
                 'FS_PDF_FORMAT' => Configuration::get('FS_PDF_FORMAT', 0),
                 // CRON
                 'FS_CRON_ENABLED' => Configuration::get('FS_CRON_ENABLED'),
-                'FS_CRON_INTERVAL' => Configuration::get('FS_CRON_INTERVAL', 10)
+                'FS_CRON_INTERVAL' => Configuration::get('FS_CRON_INTERVAL', 10),
+                'FS_CRON_TOKEN' => Configuration::get('FS_CRON_TOKEN')
             ],
             'languages' => $this->context->controller->getLanguages(),
             'id_language' => $this->context->language->id
