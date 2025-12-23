@@ -609,6 +609,14 @@ class FsFacturaScripts extends Module
             foreach ($facturas as $factura) {
                 // Solo procesar facturas que tienen numero2 (referencia PrestaShop)
                 if (empty($factura['numero2'])) {
+                    PrestaShopLogger::addLog(
+                        "FacturaScripts API: Factura sin numero2 (referencia PrestaShop) - ID: " . ($factura['idfactura'] ?? 'desconocido'),
+                        2,
+                        null,
+                        'Module',
+                        0,
+                        true
+                    );
                     continue;
                 }
 
@@ -617,6 +625,14 @@ class FsFacturaScripts extends Module
                 $order_id = Db::getInstance()->getValue($sql);
 
                 if (!$order_id) {
+                    PrestaShopLogger::addLog(
+                        "FacturaScripts API: Pedido no encontrado en PrestaShop - Ref: " . $factura['numero2'],
+                        2,
+                        null,
+                        'Module',
+                        0,
+                        true
+                    );
                     continue;
                 }
 
@@ -626,24 +642,65 @@ class FsFacturaScripts extends Module
                     $fecha_factura = date('Y-m-d', strtotime($factura['fecha']));
                 }
 
-                // USAR REPLACE INTO para SIEMPRE sobrescribir
-                // Si existe (mismo id_order), actualiza; si no existe, inserta
-                $sql_replace = 'REPLACE INTO ' . _DB_PREFIX_ . 'fs_facturascripts
-                    (id_order, order_reference, fs_albaran_id, fs_factura_id, fs_factura_code, fs_factura_fecha, webhook_sent, webhook_response, date_add, date_upd)
-                    VALUES (
-                        ' . (int)$order_id . ',
-                        "' . pSQL($factura['numero2']) . '",
-                        NULL,
-                        ' . (int)$factura['idfactura'] . ',
-                        "' . pSQL($factura['codigo']) . '",
-                        ' . ($fecha_factura ? '"' . pSQL($fecha_factura) . '"' : 'NULL') . ',
-                        1,
-                        "Sincronizado desde API (facturas)",
-                        COALESCE((SELECT date_add FROM ' . _DB_PREFIX_ . 'fs_facturascripts WHERE id_order = ' . (int)$order_id . '), "' . date('Y-m-d H:i:s') . '"),
-                        "' . date('Y-m-d H:i:s') . '"
-                    )';
+                // Verificar si ya existe el registro
+                $existing = Db::getInstance()->getRow(
+                    'SELECT id_fs_facturascripts, date_add FROM ' . _DB_PREFIX_ . 'fs_facturascripts
+                    WHERE id_order = ' . (int)$order_id
+                );
 
-                Db::getInstance()->execute($sql_replace);
+                if ($existing) {
+                    // Actualizar registro existente
+                    $sql_update = 'UPDATE ' . _DB_PREFIX_ . 'fs_facturascripts SET
+                        order_reference = "' . pSQL($factura['numero2']) . '",
+                        fs_factura_id = ' . (int)$factura['idfactura'] . ',
+                        fs_factura_code = "' . pSQL($factura['codigo']) . '",
+                        fs_factura_fecha = ' . ($fecha_factura ? '"' . pSQL($fecha_factura) . '"' : 'NULL') . ',
+                        webhook_sent = 1,
+                        webhook_response = "Sincronizado desde API (facturas)",
+                        date_upd = "' . date('Y-m-d H:i:s') . '"
+                        WHERE id_order = ' . (int)$order_id;
+
+                    $result = Db::getInstance()->execute($sql_update);
+                    if (!$result) {
+                        PrestaShopLogger::addLog(
+                            "FacturaScripts API: Error UPDATE - Order ID: {$order_id}, Error: " . Db::getInstance()->getMsgError(),
+                            3,
+                            null,
+                            'Module',
+                            0,
+                            true
+                        );
+                    }
+                } else {
+                    // Insertar nuevo registro
+                    $sql_insert = 'INSERT INTO ' . _DB_PREFIX_ . 'fs_facturascripts
+                        (id_order, order_reference, fs_albaran_id, fs_factura_id, fs_factura_code, fs_factura_fecha, webhook_sent, webhook_response, date_add, date_upd)
+                        VALUES (
+                            ' . (int)$order_id . ',
+                            "' . pSQL($factura['numero2']) . '",
+                            NULL,
+                            ' . (int)$factura['idfactura'] . ',
+                            "' . pSQL($factura['codigo']) . '",
+                            ' . ($fecha_factura ? '"' . pSQL($fecha_factura) . '"' : 'NULL') . ',
+                            1,
+                            "Sincronizado desde API (facturas)",
+                            "' . date('Y-m-d H:i:s') . '",
+                            "' . date('Y-m-d H:i:s') . '"
+                        )';
+
+                    $result = Db::getInstance()->execute($sql_insert);
+                    if (!$result) {
+                        PrestaShopLogger::addLog(
+                            "FacturaScripts API: Error INSERT - Order ID: {$order_id}, Ref: " . $factura['numero2'] . ", Error: " . Db::getInstance()->getMsgError(),
+                            3,
+                            null,
+                            'Module',
+                            0,
+                            true
+                        );
+                    }
+                }
+
                 $sincronizados++;
             }
 
