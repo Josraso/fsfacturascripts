@@ -62,27 +62,6 @@ class FsFacturaScripts extends Module
         }
     }
 
-    /**
-     * Sincronizar estado del tab con configuración de API
-     * Si API REST está desactivada, ocultar el menú
-     */
-    private function syncTabState()
-    {
-        $id_tab = (int)Tab::getIdFromClassName('AdminFsFacturas');
-        if (!$id_tab) {
-            return; // El tab no existe aún
-        }
-
-        $api_enabled = (bool)Configuration::get('FS_API_ENABLED');
-        $tab = new Tab($id_tab);
-
-        // Solo actualizar si el estado es diferente
-        if ($tab->active != $api_enabled) {
-            $tab->active = $api_enabled;
-            $tab->save();
-        }
-    }
-
     public function install()
     {
         if (!parent::install()) {
@@ -178,51 +157,6 @@ class FsFacturaScripts extends Module
             return $tab->delete();
         }
         return true;
-    }
-
-    /**
-     * Activar o desactivar el tab del menú según configuración
-     */
-    private function toggleTabVisibility($enable)
-    {
-        $id_tab = (int)Tab::getIdFromClassName('AdminFsFacturas');
-        if (!$id_tab) {
-            PrestaShopLogger::addLog(
-                'FacturaScripts: No se encontró el tab AdminFsFacturas para activar/desactivar',
-                2,
-                null,
-                'Module',
-                0,
-                true
-            );
-            return false;
-        }
-
-        $tab = new Tab($id_tab);
-        $tab->active = (bool)$enable;
-        $result = $tab->save();
-
-        if ($result) {
-            PrestaShopLogger::addLog(
-                'FacturaScripts: Tab ' . ($enable ? 'ACTIVADO' : 'DESACTIVADO') . ' correctamente',
-                1,
-                null,
-                'Module',
-                0,
-                true
-            );
-        } else {
-            PrestaShopLogger::addLog(
-                'FacturaScripts: Error al guardar estado del tab',
-                3,
-                null,
-                'Module',
-                0,
-                true
-            );
-        }
-
-        return $result;
     }
 
     private function createTables()
@@ -338,25 +272,23 @@ class FsFacturaScripts extends Module
             Configuration::updateValue('FS_API_KEY', Tools::getValue('FS_API_KEY'));
             Configuration::updateValue('FS_PDF_FORMAT', (int)Tools::getValue('FS_PDF_FORMAT'));
 
-            // Activar/Desactivar menú según API REST
-            $tab_result = $this->toggleTabVisibility($api_enabled);
+            // Instalar o desinstalar el menú según API REST
+            if ($api_enabled) {
+                $this->installTab();
+                $menu_msg = $this->l('Menú activado');
+            } else {
+                $this->uninstallTab();
+                $menu_msg = $this->l('Menú desactivado');
+            }
 
             // CRON
             Configuration::updateValue('FS_CRON_ENABLED', (int)Tools::getValue('FS_CRON_ENABLED'));
             Configuration::updateValue('FS_CRON_INTERVAL', (int)Tools::getValue('FS_CRON_INTERVAL', 10));
             Configuration::updateValue('FS_CRON_TOKEN', Tools::getValue('FS_CRON_TOKEN'));
 
-            $menu_status = $api_enabled ? 'activado' : 'desactivado';
             $output .= $this->displayConfirmation(
-                $this->l('Configuración guardada.') . ' ' .
-                $this->l('Menú "Facturas FacturaScripts" ') . $menu_status . '. ' .
-                $this->l('Recarga la página del backoffice para ver los cambios en el menú.')
+                $this->l('Configuración guardada. ') . $menu_msg
             );
-
-            // Limpiar caché de tabs
-            if ($tab_result) {
-                Tools::clearCache();
-            }
         }
 
         // Generar token si no existe
