@@ -186,12 +186,43 @@ class FsFacturaScripts extends Module
     private function toggleTabVisibility($enable)
     {
         $id_tab = (int)Tab::getIdFromClassName('AdminFsFacturas');
-        if ($id_tab) {
-            $tab = new Tab($id_tab);
-            $tab->active = (bool)$enable;
-            return $tab->save();
+        if (!$id_tab) {
+            PrestaShopLogger::addLog(
+                'FacturaScripts: No se encontró el tab AdminFsFacturas para activar/desactivar',
+                2,
+                null,
+                'Module',
+                0,
+                true
+            );
+            return false;
         }
-        return false;
+
+        $tab = new Tab($id_tab);
+        $tab->active = (bool)$enable;
+        $result = $tab->save();
+
+        if ($result) {
+            PrestaShopLogger::addLog(
+                'FacturaScripts: Tab ' . ($enable ? 'ACTIVADO' : 'DESACTIVADO') . ' correctamente',
+                1,
+                null,
+                'Module',
+                0,
+                true
+            );
+        } else {
+            PrestaShopLogger::addLog(
+                'FacturaScripts: Error al guardar estado del tab',
+                3,
+                null,
+                'Module',
+                0,
+                true
+            );
+        }
+
+        return $result;
     }
 
     private function createTables()
@@ -308,14 +339,24 @@ class FsFacturaScripts extends Module
             Configuration::updateValue('FS_PDF_FORMAT', (int)Tools::getValue('FS_PDF_FORMAT'));
 
             // Activar/Desactivar menú según API REST
-            $this->toggleTabVisibility($api_enabled);
+            $tab_result = $this->toggleTabVisibility($api_enabled);
 
             // CRON
             Configuration::updateValue('FS_CRON_ENABLED', (int)Tools::getValue('FS_CRON_ENABLED'));
             Configuration::updateValue('FS_CRON_INTERVAL', (int)Tools::getValue('FS_CRON_INTERVAL', 10));
             Configuration::updateValue('FS_CRON_TOKEN', Tools::getValue('FS_CRON_TOKEN'));
 
-            $output .= $this->displayConfirmation($this->l('Configuración guardada'));
+            $menu_status = $api_enabled ? 'activado' : 'desactivado';
+            $output .= $this->displayConfirmation(
+                $this->l('Configuración guardada.') . ' ' .
+                $this->l('Menú "Facturas FacturaScripts" ') . $menu_status . '. ' .
+                $this->l('Recarga la página del backoffice para ver los cambios en el menú.')
+            );
+
+            // Limpiar caché de tabs
+            if ($tab_result) {
+                Tools::clearCache();
+            }
         }
 
         // Generar token si no existe
