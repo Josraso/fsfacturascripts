@@ -35,9 +35,6 @@ class FsFacturaScripts extends Module
 
         // Verificar y actualizar esquema de BD al cargar el módulo
         $this->checkAndUpdateSchema();
-
-        // Sincronizar estado del tab con configuración
-        $this->syncTabState();
     }
 
     /**
