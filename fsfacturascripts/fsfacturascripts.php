@@ -98,8 +98,26 @@ class FsFacturaScripts extends Module
         // Verificar si el tab ya existe
         $id_tab = (int)Tab::getIdFromClassName('AdminFsFacturas');
         if ($id_tab) {
-            return true; // Ya existe
+            // Ya existe, verificar que esté activo
+            $tab = new Tab($id_tab);
+            if (!$tab->active) {
+                $tab->active = 1;
+                $tab->save();
+            }
+            return true;
         }
+
+        // Buscar el menú padre de forma compatible con todas las versiones
+        $id_parent = $this->findParentMenuId();
+
+        PrestaShopLogger::addLog(
+            'FacturaScripts: Instalando tab con id_parent = ' . $id_parent . ' (PS ' . _PS_VERSION_ . ')',
+            1,
+            null,
+            'Module',
+            0,
+            true
+        );
 
         $tab = new Tab();
         $tab->active = 1;
@@ -108,29 +126,6 @@ class FsFacturaScripts extends Module
         foreach (Language::getLanguages(true) as $lang) {
             $tab->name[$lang['id_lang']] = 'Facturas FacturaScripts';
         }
-
-        // Intentar obtener el ID del menú de Pedidos
-        $id_parent = (int)Tab::getIdFromClassName('AdminParentOrders');
-
-        // Si no existe, intentar con Sell (PrestaShop 8+)
-        if (!$id_parent) {
-            $id_parent = (int)Tab::getIdFromClassName('SELL');
-        }
-
-        // Si aún no existe, buscar AdminOrders y obtener su padre
-        if (!$id_parent) {
-            $id_orders = (int)Tab::getIdFromClassName('AdminOrders');
-            if ($id_orders) {
-                $parent_tab = new Tab($id_orders);
-                $id_parent = (int)$parent_tab->id_parent;
-            }
-        }
-
-        // Si todo falla, usar 0 (raíz)
-        if (!$id_parent) {
-            $id_parent = 0;
-        }
-
         $tab->id_parent = $id_parent;
         $tab->module = $this->name;
 
@@ -146,7 +141,92 @@ class FsFacturaScripts extends Module
             return false;
         }
 
+        PrestaShopLogger::addLog(
+            'FacturaScripts: Tab instalado correctamente con ID ' . $tab->id,
+            1,
+            null,
+            'Module',
+            0,
+            true
+        );
+
         return true;
+    }
+
+    /**
+     * Buscar el ID del menú padre compatible con todas las versiones de PrestaShop
+     */
+    private function findParentMenuId()
+    {
+        // Lista de posibles menús padre en orden de prioridad
+        $possible_parents = [
+            'AdminParentOrders',     // PrestaShop 1.7.x
+            'SELL',                  // PrestaShop 8.x uppercase
+            'Sell',                  // PrestaShop 8.x mixed case
+            'ShopParameters',        // Alternativa
+            'AdminParentModulesSf',  // Alternativa
+        ];
+
+        foreach ($possible_parents as $parent_class) {
+            $id_parent = (int)Tab::getIdFromClassName($parent_class);
+            if ($id_parent) {
+                PrestaShopLogger::addLog(
+                    "FacturaScripts: Menú padre encontrado: {$parent_class} (ID: {$id_parent})",
+                    1,
+                    null,
+                    'Module',
+                    0,
+                    true
+                );
+                return $id_parent;
+            }
+        }
+
+        // Si no encuentra ninguno, buscar el padre de AdminOrders
+        $id_orders = (int)Tab::getIdFromClassName('AdminOrders');
+        if ($id_orders) {
+            $parent_tab = new Tab($id_orders);
+            if ($parent_tab->id_parent) {
+                PrestaShopLogger::addLog(
+                    "FacturaScripts: Usando padre de AdminOrders (ID: {$parent_tab->id_parent})",
+                    1,
+                    null,
+                    'Module',
+                    0,
+                    true
+                );
+                return (int)$parent_tab->id_parent;
+            }
+        }
+
+        // Último recurso: buscar directamente en la base de datos
+        $sql = 'SELECT id_tab FROM ' . _DB_PREFIX_ . 'tab
+                WHERE class_name IN ("AdminParentOrders", "SELL", "Sell")
+                AND active = 1
+                LIMIT 1';
+        $id_parent = (int)Db::getInstance()->getValue($sql);
+        if ($id_parent) {
+            PrestaShopLogger::addLog(
+                "FacturaScripts: Menú padre encontrado en BD (ID: {$id_parent})",
+                1,
+                null,
+                'Module',
+                0,
+                true
+            );
+            return $id_parent;
+        }
+
+        // Si todo falla, usar el nivel raíz (0)
+        PrestaShopLogger::addLog(
+            'FacturaScripts: No se encontró menú padre, usando raíz (0)',
+            2,
+            null,
+            'Module',
+            0,
+            true
+        );
+        return 0;
     }
 
     private function uninstallTab()
