@@ -79,11 +79,17 @@ class FsFacturaScripts extends Module
         }
 
         // Registrar hooks
-        return $this->registerHook('actionOrderStatusPostUpdate') &&
+        $hooks_registered = $this->registerHook('actionOrderStatusPostUpdate') &&
                $this->registerHook('actionValidateOrder') &&
                $this->registerHook('displayOrderDetail') &&
                $this->registerHook('displayCustomerAccount') &&
                $this->registerHook('actionCronJob');
+
+        // Hooks adicionales para PrestaShop 8+ (compatibilidad)
+        $this->registerHook('actionOrderStatusUpdate');
+        $this->registerHook('actionPaymentConfirmation');
+
+        return $hooks_registered;
     }
 
     public function uninstall()
@@ -781,22 +787,153 @@ class FsFacturaScripts extends Module
      */
     public function hookActionValidateOrder($params)
     {
+        PrestaShopLogger::addLog(
+            'FacturaScripts: Hook actionValidateOrder ejecutado (PS ' . _PS_VERSION_ . ')',
+            1,
+            null,
+            'Module',
+            0,
+            true
+        );
+
         if (!Configuration::get('FS_WEBHOOK_ENABLED')) {
+            PrestaShopLogger::addLog(
+                'FacturaScripts: Webhook desactivado en configuración',
+                2,
+                null,
+                'Module',
+                0,
+                true
+            );
             return;
         }
 
-        $order = $params['order'];
-        $this->sendWebhookToFacturaScripts($order);
+        // Compatible con diferentes versiones
+        $order = isset($params['order']) ? $params['order'] : null;
+        if (!$order && isset($params['id_order'])) {
+            $order = new Order($params['id_order']);
+        }
+
+        if ($order && $order->id) {
+            PrestaShopLogger::addLog(
+                'FacturaScripts: Enviando webhook para pedido #' . $order->id . ' (Ref: ' . $order->reference . ')',
+                1,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
+            $this->sendWebhookToFacturaScripts($order);
+        } else {
+            PrestaShopLogger::addLog(
+                'FacturaScripts: No se pudo obtener el pedido desde actionValidateOrder',
+                3,
+                null,
+                'Module',
+                0,
+                true
+            );
+        }
     }
 
     public function hookActionOrderStatusPostUpdate($params)
     {
+        PrestaShopLogger::addLog(
+            'FacturaScripts: Hook actionOrderStatusPostUpdate ejecutado (PS ' . _PS_VERSION_ . ')',
+            1,
+            null,
+            'Module',
+            0,
+            true
+        );
+
         if (!Configuration::get('FS_WEBHOOK_ENABLED')) {
             return;
         }
 
         $order = new Order($params['id_order']);
-        $this->sendWebhookToFacturaScripts($order);
+        if ($order->id) {
+            PrestaShopLogger::addLog(
+                'FacturaScripts: Enviando webhook para pedido #' . $order->id . ' (Estado actualizado)',
+                1,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
+            $this->sendWebhookToFacturaScripts($order);
+        }
+    }
+
+    /**
+     * Hook alternativo para PrestaShop 8+ (sin "Post")
+     */
+    public function hookActionOrderStatusUpdate($params)
+    {
+        PrestaShopLogger::addLog(
+            'FacturaScripts: Hook actionOrderStatusUpdate ejecutado (PS ' . _PS_VERSION_ . ')',
+            1,
+            null,
+            'Module',
+            0,
+            true
+        );
+
+        if (!Configuration::get('FS_WEBHOOK_ENABLED')) {
+            return;
+        }
+
+        $order_id = isset($params['id_order']) ? $params['id_order'] : (isset($params['newOrderStatus']->id_order) ? $params['newOrderStatus']->id_order : 0);
+
+        if ($order_id) {
+            $order = new Order($order_id);
+            if ($order->id) {
+                PrestaShopLogger::addLog(
+                    'FacturaScripts: Enviando webhook para pedido #' . $order->id . ' (actionOrderStatusUpdate)',
+                    1,
+                    null,
+                    'Order',
+                    $order->id,
+                    true
+                );
+                $this->sendWebhookToFacturaScripts($order);
+            }
+        }
+    }
+
+    /**
+     * Hook cuando se confirma el pago
+     */
+    public function hookActionPaymentConfirmation($params)
+    {
+        PrestaShopLogger::addLog(
+            'FacturaScripts: Hook actionPaymentConfirmation ejecutado (PS ' . _PS_VERSION_ . ')',
+            1,
+            null,
+            'Module',
+            0,
+            true
+        );
+
+        if (!Configuration::get('FS_WEBHOOK_ENABLED')) {
+            return;
+        }
+
+        $order_id = isset($params['id_order']) ? $params['id_order'] : 0;
+        if ($order_id) {
+            $order = new Order($order_id);
+            if ($order->id) {
+                PrestaShopLogger::addLog(
+                    'FacturaScripts: Enviando webhook para pedido #' . $order->id . ' (Pago confirmado)',
+                    1,
+                    null,
+                    'Order',
+                    $order->id,
+                    true
+                );
+                $this->sendWebhookToFacturaScripts($order);
+            }
+        }
     }
 
     /**
@@ -845,6 +982,14 @@ class FsFacturaScripts extends Module
         $fs_token = Configuration::get('FS_WEBHOOK_TOKEN');
 
         if (empty($fs_url) || empty($fs_token)) {
+            PrestaShopLogger::addLog(
+                'FacturaScripts: URL o Token de webhook no configurados',
+                2,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
             return;
         }
 
@@ -864,11 +1009,20 @@ class FsFacturaScripts extends Module
             'order_id' => $order->id,
             'order_reference' => $order->reference,
             'current_state' => $order->getCurrentState(),
-            'current_state_date' => $state_date,  // NUEVA: Fecha del estado actual
+            'current_state_date' => $state_date,
             'total_paid' => $order->total_paid,
             'id_customer' => $order->id_customer,
-            'date_add' => $order->date_add  // Fecha de creación del pedido
+            'date_add' => $order->date_add
         ];
+
+        PrestaShopLogger::addLog(
+            'FacturaScripts: Enviando webhook a ' . $webhook_url . ' - Pedido #' . $order->id . ' (Estado: ' . $order->getCurrentState() . ')',
+            1,
+            null,
+            'Order',
+            $order->id,
+            true
+        );
 
         try {
             $ch = curl_init($webhook_url);
@@ -877,15 +1031,38 @@ class FsFacturaScripts extends Module
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
             curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
             curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 
             $response = curl_exec($ch);
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curl_error = curl_error($ch);
             curl_close($ch);
+
+            if ($curl_error) {
+                PrestaShopLogger::addLog(
+                    'FacturaScripts Webhook CURL Error: ' . $curl_error,
+                    3,
+                    null,
+                    'Order',
+                    $order->id,
+                    true
+                );
+                return;
+            }
+
+            PrestaShopLogger::addLog(
+                'FacturaScripts: Webhook enviado - HTTP ' . $http_code . ' - Respuesta: ' . substr($response, 0, 200),
+                $http_code == 200 ? 1 : 3,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
 
             $this->saveWebhookData($order, $response, $http_code == 200);
         } catch (Exception $e) {
             PrestaShopLogger::addLog(
-                'FacturaScripts Webhook Error: ' . $e->getMessage(),
+                'FacturaScripts Webhook Exception: ' . $e->getMessage(),
                 3,
                 null,
                 'Order',
