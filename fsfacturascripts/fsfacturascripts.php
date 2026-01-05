@@ -518,7 +518,7 @@ class FsFacturaScripts extends Module
                             <strong>2. Usando crontab del sistema (PHP CLI):</strong><br>
                             <code>*/10 * * * * php ' . _PS_MODULE_DIR_ . 'fsfacturascripts/cron.php</code><br><br>
                             <strong>3. Usando crontab con wget (recomendado si no tienes acceso SSH):</strong><br>
-                            <code>*/10 * * * * wget -q -O- "https://' . Tools::getShopDomain(true) . __PS_BASE_URI__ . 'modules/fsfacturascripts/cron.php?token=' . Configuration::get('FS_CRON_TOKEN') . '" > /dev/null 2>&1</code><br>
+                            <code>*/10 * * * * wget -q -O- "https://' . Tools::getShopDomain(true, false) . __PS_BASE_URI__ . 'modules/fsfacturascripts/cron.php?token=' . Configuration::get('FS_CRON_TOKEN') . '" > /dev/null 2>&1</code><br>
                             <small style="color: green;">✓ El token se genera automáticamente y está configurado de forma segura</small>
                         </div>'
                     ]
