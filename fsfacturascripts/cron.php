@@ -37,10 +37,10 @@ if (!$module || !$module->active) {
     die('Módulo no encontrado o inactivo');
 }
 
-// Ejecutar sincronización
+// Ejecutar sincronización (forzada, sin verificar intervalo)
 echo "[" . date('Y-m-d H:i:s') . "] Iniciando sincronización CRON...\n";
 
-$result = $module->hookActionCronJob();
+$result = $module->hookActionCronJob(['force' => true]);
 
 if (is_array($result) && isset($result['error'])) {
     echo "[ERROR] " . $result['error'] . "\n";

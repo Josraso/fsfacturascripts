@@ -518,7 +518,7 @@ class FsFacturaScripts extends Module
                             <strong>2. Usando crontab del sistema (PHP CLI):</strong><br>
                             <code>*/10 * * * * php ' . _PS_MODULE_DIR_ . 'fsfacturascripts/cron.php</code><br><br>
                             <strong>3. Usando crontab con wget (recomendado si no tienes acceso SSH):</strong><br>
-                            <code>*/10 * * * * wget -q -O- "' . _PS_BASE_URL_ . __PS_BASE_URI__ . 'modules/fsfacturascripts/cron.php?token=' . Configuration::get('FS_CRON_TOKEN') . '" > /dev/null 2>&1</code><br>
+                            <code>*/10 * * * * wget -q -O- "https://' . Tools::getShopDomain(true, true) . __PS_BASE_URI__ . 'modules/fsfacturascripts/cron.php?token=' . Configuration::get('FS_CRON_TOKEN') . '" > /dev/null 2>&1</code><br>
                             <small style="color: green;">✓ El token se genera automáticamente y está configurado de forma segura</small>
                         </div>'
                     ]
@@ -940,23 +940,52 @@ class FsFacturaScripts extends Module
      * Hook para CRON: Sincronización automática cada X minutos
      * Compatible con módulo "cronjobs" de PrestaShop
      */
-    public function hookActionCronJob()
+    public function hookActionCronJob($params = [])
     {
         // Solo ejecutar si está activado
         if (!Configuration::get('FS_CRON_ENABLED')) {
-            return;
+            PrestaShopLogger::addLog(
+                'FacturaScripts CRON: Sincronización desactivada en configuración',
+                2,
+                null,
+                'Module',
+                0,
+                true
+            );
+            return ['error' => 'CRON desactivado'];
         }
 
-        // Verificar intervalo (en minutos)
-        $interval = (int)Configuration::get('FS_CRON_INTERVAL', 10);
-        $last_sync = Configuration::get('FS_LAST_CRON_SYNC');
+        // Verificar intervalo solo si NO se llama manualmente
+        $force = isset($params['force']) ? $params['force'] : false;
 
-        if ($last_sync) {
-            $time_diff = (time() - strtotime($last_sync)) / 60; // Diferencia en minutos
-            if ($time_diff < $interval) {
-                return; // Aún no toca sincronizar
+        if (!$force) {
+            $interval = (int)Configuration::get('FS_CRON_INTERVAL', 10);
+            $last_sync = Configuration::get('FS_LAST_CRON_SYNC');
+
+            if ($last_sync) {
+                $time_diff = (time() - strtotime($last_sync)) / 60;
+                if ($time_diff < $interval) {
+                    PrestaShopLogger::addLog(
+                        "FacturaScripts CRON: Omitido - última sync hace {$time_diff} min (intervalo: {$interval} min)",
+                        1,
+                        null,
+                        'Module',
+                        0,
+                        true
+                    );
+                    return ['error' => 'Intervalo no alcanzado'];
+                }
             }
         }
+
+        PrestaShopLogger::addLog(
+            'FacturaScripts CRON: Iniciando sincronización...',
+            1,
+            null,
+            'Module',
+            0,
+            true
+        );
 
         // Ejecutar sincronización
         $result = $this->syncOrdersFromAPI();
@@ -974,6 +1003,8 @@ class FsFacturaScripts extends Module
             0,
             true
         );
+
+        return $result;
     }
 
     private function sendWebhookToFacturaScripts($order)
