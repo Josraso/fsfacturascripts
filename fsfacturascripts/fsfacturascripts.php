@@ -702,9 +702,14 @@ class FsFacturaScripts extends Module
             }
 
             // Procesar facturas de esta página
+            $procesadas_pagina = 0;
+            $sin_numero2 = 0;
+            $sin_pedido = 0;
+
             foreach ($facturas as $factura) {
                 // Solo procesar facturas que tienen numero2 (referencia PrestaShop)
                 if (empty($factura['numero2'])) {
+                    $sin_numero2++;
                     continue;
                 }
 
@@ -713,6 +718,18 @@ class FsFacturaScripts extends Module
                 $order_id = Db::getInstance()->getValue($sql);
 
                 if (!$order_id) {
+                    $sin_pedido++;
+                    // Log solo para las primeras 5 facturas sin pedido de esta página para debugging
+                    if ($sin_pedido <= 5 && $iteration == 1) {
+                        PrestaShopLogger::addLog(
+                            "FacturaScripts API: Factura sin pedido en PS - Ref: '" . $factura['numero2'] . "' (Factura: " . $factura['codigo'] . ")",
+                            2,
+                            null,
+                            'Module',
+                            0,
+                            true
+                        );
+                    }
                     continue;
                 }
 
@@ -782,7 +799,18 @@ class FsFacturaScripts extends Module
                 }
 
                 $sincronizados++;
+                $procesadas_pagina++;
             }
+
+            // Log de estadísticas de esta página
+            PrestaShopLogger::addLog(
+                "FacturaScripts API: Página {$iteration} - Guardadas: {$procesadas_pagina}, Sin numero2: {$sin_numero2}, Sin pedido PS: {$sin_pedido}",
+                1,
+                null,
+                'Module',
+                0,
+                true
+            );
 
             // Siguiente página
             $offset += $limit;
