@@ -1072,9 +1072,19 @@ class FsFacturaScripts extends Module
         $fs_url = Configuration::get('FS_WEBHOOK_URL');
         $fs_token = Configuration::get('FS_WEBHOOK_TOKEN');
 
+        // DEBUG: Registrar lo que lee Configuration::get()
+        PrestaShopLogger::addLog(
+            'FacturaScripts DEBUG: URL=[' . var_export($fs_url, true) . '] Token=[' . var_export($fs_token, true) . ']',
+            1,
+            null,
+            'Order',
+            $order->id,
+            true
+        );
+
         if (empty($fs_url) || empty($fs_token)) {
             PrestaShopLogger::addLog(
-                'FacturaScripts: URL o Token de webhook no configurados',
+                'FacturaScripts: URL o Token de webhook no configurados (empty check failed)',
                 2,
                 null,
                 'Order',
