@@ -1069,63 +1069,92 @@ class FsFacturaScripts extends Module
 
     private function sendWebhookToFacturaScripts($order)
     {
-        $fs_url = Configuration::get('FS_WEBHOOK_URL');
-        $fs_token = Configuration::get('FS_WEBHOOK_TOKEN');
+        try {
+            $fs_url = Configuration::get('FS_WEBHOOK_URL');
+            $fs_token = Configuration::get('FS_WEBHOOK_TOKEN');
 
-        // DEBUG: Registrar lo que lee Configuration::get()
-        PrestaShopLogger::addLog(
-            'FacturaScripts DEBUG: URL=[' . var_export($fs_url, true) . '] Token=[' . var_export($fs_token, true) . ']',
-            1,
-            null,
-            'Order',
-            $order->id,
-            true
-        );
-
-        if (empty($fs_url) || empty($fs_token)) {
+            // DEBUG: Registrar lo que lee Configuration::get()
             PrestaShopLogger::addLog(
-                'FacturaScripts: URL o Token de webhook no configurados (empty check failed)',
-                2,
+                'FacturaScripts DEBUG: URL=[' . var_export($fs_url, true) . '] Token=[' . var_export($fs_token, true) . ']',
+                1,
                 null,
                 'Order',
                 $order->id,
                 true
             );
-            return;
-        }
 
-        // Obtener fecha del estado actual desde el historial
-        $sql = 'SELECT oh.date_add as state_date
-                FROM ' . _DB_PREFIX_ . 'order_history oh
-                WHERE oh.id_order = ' . (int)$order->id . '
-                AND oh.id_order_state = ' . (int)$order->getCurrentState() . '
-                ORDER BY oh.date_add DESC, oh.id_order_history DESC
-                LIMIT 1';
+            if (empty($fs_url) || empty($fs_token)) {
+                PrestaShopLogger::addLog(
+                    'FacturaScripts: URL o Token de webhook no configurados (empty check failed)',
+                    2,
+                    null,
+                    'Order',
+                    $order->id,
+                    true
+                );
+                return;
+            }
 
-        $state_history = Db::getInstance()->getRow($sql);
-        $state_date = $state_history ? $state_history['state_date'] : $order->date_add;
+            PrestaShopLogger::addLog(
+                'FacturaScripts DEBUG: Paso 1 - Obteniendo estado del pedido...',
+                1,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
 
-        $webhook_url = rtrim($fs_url, '/') . '/WebhookPrestashop?token=' . $fs_token;
-        $payload = [
-            'order_id' => $order->id,
-            'order_reference' => $order->reference,
-            'current_state' => $order->getCurrentState(),
-            'current_state_date' => $state_date,
-            'total_paid' => $order->total_paid,
-            'id_customer' => $order->id_customer,
-            'date_add' => $order->date_add
-        ];
+            // Obtener fecha del estado actual desde el historial
+            $current_state = method_exists($order, 'getCurrentState') ? $order->getCurrentState() : $order->current_state;
 
-        PrestaShopLogger::addLog(
-            'FacturaScripts: Enviando webhook a ' . $webhook_url . ' - Pedido #' . $order->id . ' (Estado: ' . $order->getCurrentState() . ')',
-            1,
-            null,
-            'Order',
-            $order->id,
-            true
-        );
+            PrestaShopLogger::addLog(
+                'FacturaScripts DEBUG: Paso 2 - Estado obtenido: ' . $current_state,
+                1,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
 
-        try {
+            $sql = 'SELECT oh.date_add as state_date
+                    FROM ' . _DB_PREFIX_ . 'order_history oh
+                    WHERE oh.id_order = ' . (int)$order->id . '
+                    AND oh.id_order_state = ' . (int)$current_state . '
+                    ORDER BY oh.date_add DESC, oh.id_order_history DESC
+                    LIMIT 1';
+
+            $state_history = Db::getInstance()->getRow($sql);
+            $state_date = $state_history ? $state_history['state_date'] : $order->date_add;
+
+            PrestaShopLogger::addLog(
+                'FacturaScripts DEBUG: Paso 3 - Construyendo webhook URL...',
+                1,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
+
+            $webhook_url = rtrim($fs_url, '/') . '/WebhookPrestashop?token=' . $fs_token;
+            $payload = [
+                'order_id' => $order->id,
+                'order_reference' => $order->reference,
+                'current_state' => $current_state,
+                'current_state_date' => $state_date,
+                'total_paid' => $order->total_paid,
+                'id_customer' => $order->id_customer,
+                'date_add' => $order->date_add
+            ];
+
+            PrestaShopLogger::addLog(
+                'FacturaScripts: Enviando webhook a ' . $webhook_url . ' - Pedido #' . $order->id . ' (Estado: ' . $current_state . ')',
+                1,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
+
             $ch = curl_init($webhook_url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_POST, true);
@@ -1161,9 +1190,19 @@ class FsFacturaScripts extends Module
             );
 
             $this->saveWebhookData($order, $response, $http_code == 200);
+
         } catch (Exception $e) {
             PrestaShopLogger::addLog(
-                'FacturaScripts Webhook Exception: ' . $e->getMessage(),
+                'FacturaScripts Webhook EXCEPTION COMPLETA: ' . $e->getMessage() . ' | Trace: ' . $e->getTraceAsString(),
+                3,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
+        } catch (Error $e) {
+            PrestaShopLogger::addLog(
+                'FacturaScripts Webhook ERROR FATAL: ' . $e->getMessage() . ' | Trace: ' . $e->getTraceAsString(),
                 3,
                 null,
                 'Order',
