@@ -1133,72 +1133,18 @@ class FsFacturaScripts extends Module
                 true
             );
 
-            // Obtener fecha del estado actual
-            $state_date = $order->date_add; // Por defecto, fecha del pedido
+            // Usar siempre la fecha del pedido para evitar problemas de compatibilidad
+            // con diferentes versiones de PrestaShop que pueden tener esquemas distintos
+            $state_date = $order->date_add;
 
-            // Solo buscar fecha del estado si tenemos un estado válido > 0
-            if ($current_state && is_numeric($current_state) && $current_state > 0) {
-                try {
-                    // Asegurar que es un entero válido
-                    $state_id = (int)$current_state;
-
-                    PrestaShopLogger::addLog(
-                        'FacturaScripts DEBUG: Buscando fecha para estado: ' . $state_id . ' del pedido: ' . (int)$order->id,
-                        1,
-                        null,
-                        'Order',
-                        $order->id,
-                        true
-                    );
-
-                    $sql = 'SELECT oh.date_add as state_date
-                            FROM `' . _DB_PREFIX_ . 'order_history` oh
-                            WHERE oh.id_order = ' . (int)$order->id . '
-                            AND oh.id_order_state = ' . $state_id . '
-                            ORDER BY oh.date_add DESC, oh.id_order_history DESC
-                            LIMIT 1';
-
-                    $state_history = Db::getInstance()->getRow($sql);
-                    if ($state_history && isset($state_history['state_date'])) {
-                        $state_date = $state_history['state_date'];
-                        PrestaShopLogger::addLog(
-                            'FacturaScripts DEBUG: Fecha de estado encontrada: ' . $state_date,
-                            1,
-                            null,
-                            'Order',
-                            $order->id,
-                            true
-                        );
-                    } else {
-                        PrestaShopLogger::addLog(
-                            'FacturaScripts DEBUG: No se encontró fecha de estado, usando fecha del pedido',
-                            1,
-                            null,
-                            'Order',
-                            $order->id,
-                            true
-                        );
-                    }
-                } catch (Exception $e) {
-                    PrestaShopLogger::addLog(
-                        'FacturaScripts DEBUG: Error al obtener fecha de estado: ' . $e->getMessage() . ' - SQL: ' . (isset($sql) ? $sql : 'N/A'),
-                        3,
-                        null,
-                        'Order',
-                        $order->id,
-                        true
-                    );
-                }
-            } else {
-                PrestaShopLogger::addLog(
-                    'FacturaScripts DEBUG: Estado no válido (' . var_export($current_state, true) . '), usando fecha del pedido',
-                    2,
-                    null,
-                    'Order',
-                    $order->id,
-                    true
-                );
-            }
+            PrestaShopLogger::addLog(
+                'FacturaScripts DEBUG: Usando fecha del pedido: ' . $state_date,
+                1,
+                null,
+                'Order',
+                $order->id,
+                true
+            );
 
             PrestaShopLogger::addLog(
                 'FacturaScripts DEBUG: Paso 3 - Construyendo webhook URL...',
