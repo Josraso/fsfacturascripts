@@ -1104,8 +1104,25 @@ class FsFacturaScripts extends Module
                 true
             );
 
-            // Obtener fecha del estado actual desde el historial
-            $current_state = method_exists($order, 'getCurrentState') ? $order->getCurrentState() : $order->current_state;
+            // Obtener estado actual del pedido de forma segura
+            $current_state = 0;
+            if (method_exists($order, 'getCurrentState')) {
+                $current_state = (int)$order->getCurrentState();
+            } elseif (isset($order->current_state)) {
+                $current_state = (int)$order->current_state;
+            } elseif (isset($order->id_order_state)) {
+                $current_state = (int)$order->id_order_state;
+            }
+
+            // Si aún no tenemos estado, buscar el más reciente
+            if (!$current_state) {
+                $sql_state = 'SELECT oh.id_order_state
+                        FROM ' . _DB_PREFIX_ . 'order_history oh
+                        WHERE oh.id_order = ' . (int)$order->id . '
+                        ORDER BY oh.date_add DESC, oh.id_order_history DESC
+                        LIMIT 1';
+                $current_state = (int)Db::getInstance()->getValue($sql_state);
+            }
 
             PrestaShopLogger::addLog(
                 'FacturaScripts DEBUG: Paso 2 - Estado obtenido: ' . $current_state,
@@ -1116,15 +1133,21 @@ class FsFacturaScripts extends Module
                 true
             );
 
-            $sql = 'SELECT oh.date_add as state_date
-                    FROM ' . _DB_PREFIX_ . 'order_history oh
-                    WHERE oh.id_order = ' . (int)$order->id . '
-                    AND oh.id_order_state = ' . (int)$current_state . '
-                    ORDER BY oh.date_add DESC, oh.id_order_history DESC
-                    LIMIT 1';
+            // Obtener fecha del estado actual
+            $state_date = $order->date_add; // Por defecto, fecha del pedido
+            if ($current_state) {
+                $sql = 'SELECT oh.date_add as state_date
+                        FROM ' . _DB_PREFIX_ . 'order_history oh
+                        WHERE oh.id_order = ' . (int)$order->id . '
+                        AND oh.id_order_state = ' . (int)$current_state . '
+                        ORDER BY oh.date_add DESC, oh.id_order_history DESC
+                        LIMIT 1';
 
-            $state_history = Db::getInstance()->getRow($sql);
-            $state_date = $state_history ? $state_history['state_date'] : $order->date_add;
+                $state_history = Db::getInstance()->getRow($sql);
+                if ($state_history) {
+                    $state_date = $state_history['state_date'];
+                }
+            }
 
             PrestaShopLogger::addLog(
                 'FacturaScripts DEBUG: Paso 3 - Construyendo webhook URL...',
