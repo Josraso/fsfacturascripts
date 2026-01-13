@@ -601,16 +601,34 @@ class FsFacturaScripts extends Module
 
         $sincronizados = 0;
         $offset = 0;
-        $limit = 100; // Obtener 100 facturas por página
+        $limit = 500; // Aumentado a 500 por página para ser más eficiente
         $total_facturas = 0;
+        $max_iterations = 200; // Protección: máximo 200 iteraciones (500 x 200 = 100,000 facturas)
+        $iteration = 0;
 
         // Iterar sobre todas las páginas
         do {
+            $iteration++;
+
+            // Protección contra bucles infinitos
+            if ($iteration > $max_iterations) {
+                PrestaShopLogger::addLog(
+                    "FacturaScripts API: Alcanzado límite de iteraciones ({$max_iterations}). Total procesado: {$sincronizados}",
+                    2,
+                    null,
+                    'Module',
+                    0,
+                    true
+                );
+                break;
+            }
+
             // Llamar al endpoint de FACTURAS con paginación
-            $api_url = rtrim($fs_url, '/') . '/api/3/facturaclientes?offset=' . $offset . '&limit=' . $limit;
+            // NO usar filtros de fecha para obtener TODAS las facturas
+            $api_url = rtrim($fs_url, '/') . '/api/3/facturaclientes?offset=' . $offset . '&limit=' . $limit . '&sort=-fecha';
 
             PrestaShopLogger::addLog(
-                "FacturaScripts API: Obteniendo FACTURAS desde {$api_url}",
+                "FacturaScripts API: Página {$iteration} - Obteniendo {$limit} facturas desde offset {$offset}",
                 1,
                 null,
                 'Module',
@@ -620,7 +638,7 @@ class FsFacturaScripts extends Module
 
             $ch = curl_init($api_url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 60); // Aumentado timeout a 60 segundos
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
                 'Token:' . $api_key,
@@ -661,18 +679,32 @@ class FsFacturaScripts extends Module
             $facturas_count = count($facturas);
             $total_facturas += $facturas_count;
 
+            PrestaShopLogger::addLog(
+                "FacturaScripts API: Recibidas {$facturas_count} facturas en página {$iteration}",
+                1,
+                null,
+                'Module',
+                0,
+                true
+            );
+
+            // Si no hay facturas, terminamos
+            if ($facturas_count == 0) {
+                PrestaShopLogger::addLog(
+                    "FacturaScripts API: No hay más facturas. Total: {$total_facturas}",
+                    1,
+                    null,
+                    'Module',
+                    0,
+                    true
+                );
+                break;
+            }
+
             // Procesar facturas de esta página
             foreach ($facturas as $factura) {
                 // Solo procesar facturas que tienen numero2 (referencia PrestaShop)
                 if (empty($factura['numero2'])) {
-                    PrestaShopLogger::addLog(
-                        "FacturaScripts API: Factura sin numero2 (referencia PrestaShop) - ID: " . ($factura['idfactura'] ?? 'desconocido'),
-                        2,
-                        null,
-                        'Module',
-                        0,
-                        true
-                    );
                     continue;
                 }
 
@@ -681,14 +713,6 @@ class FsFacturaScripts extends Module
                 $order_id = Db::getInstance()->getValue($sql);
 
                 if (!$order_id) {
-                    PrestaShopLogger::addLog(
-                        "FacturaScripts API: Pedido no encontrado en PrestaShop - Ref: " . $factura['numero2'],
-                        2,
-                        null,
-                        'Module',
-                        0,
-                        true
-                    );
                     continue;
                 }
 
@@ -765,13 +789,21 @@ class FsFacturaScripts extends Module
 
             // Si devolvió menos de $limit, ya no hay más
             if ($facturas_count < $limit) {
+                PrestaShopLogger::addLog(
+                    "FacturaScripts API: Última página alcanzada (recibidas {$facturas_count} < {$limit})",
+                    1,
+                    null,
+                    'Module',
+                    0,
+                    true
+                );
                 break;
             }
 
         } while (true);
 
         PrestaShopLogger::addLog(
-            "FacturaScripts API: ✓ Sincronizados {$sincronizados} pedidos de {$total_facturas} facturas encontradas",
+            "FacturaScripts API: ✓ Sincronizados {$sincronizados} pedidos de {$total_facturas} facturas encontradas en {$iteration} páginas",
             1,
             null,
             'Module',
